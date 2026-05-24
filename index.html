@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>両手タッチ ストップウォッチ</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+      touch-action: none;
+    }
+
+    body {
+      position: fixed;
+      width: 100vw;
+      height: 100vh;
+      margin: 0;
+      font-family: sans-serif;
+      background: #111;
+      color: white;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+      overflow: hidden;
+      overscroll-behavior: none;
+    }
+
+    .status {
+      height: 24px;
+      width: 100%;
+      background: red;
+      transition: background 0.15s;
+    }
+
+    .status.ready {
+      background: #00d000;
+    }
+
+    .main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      gap: 20px;
+    }
+
+    .time {
+      font-size: clamp(48px, 14vw, 120px);
+      font-weight: bold;
+      letter-spacing: 2px;
+    }
+
+    .message {
+      font-size: clamp(18px, 4vw, 28px);
+      text-align: center;
+      opacity: 0.9;
+    }
+
+    .touch-zone {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      pointer-events: none;
+    }
+
+    .touch-left,
+    .touch-right {
+      flex: 1;
+    }
+
+    .history {
+      background: #1c1c1c;
+      max-height: 35vh;
+      overflow-y: auto;
+      border-top: 2px solid #333;
+      padding: 12px;
+    }
+
+    .history h2 {
+      margin: 0 0 10px;
+      font-size: 18px;
+    }
+
+    .record {
+      display: flex;
+      justify-content: space-between;
+      padding: 8px 0;
+      border-bottom: 1px solid #333;
+      font-size: 18px;
+    }
+
+    button {
+      border: none;
+      border-radius: 12px;
+      padding: 12px 20px;
+      font-size: 18px;
+      font-weight: bold;
+      background: #2d2d2d;
+      color: white;
+    }
+
+    button:active {
+      transform: scale(0.98);
+    }
+  </style>
+  <link rel="manifest" href="manifest.json" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Stopwatch" />
+  <meta name="theme-color" content="#111111" />
+</head>
+<body>
+  <div class="status" id="statusBar"></div>
+
+  <div class="main">
+    <div class="time" id="timeDisplay">0.000</div>
+    <div class="message" id="message">
+      横向きで使用してください<br>
+      両手で画面をタッチしてください
+    </div>
+
+    <button id="resetButton">履歴をクリア</button>
+  </div>
+
+  <div class="history">
+    <h2>記録</h2>
+    <div id="historyList"></div>
+  </div>
+
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js');
+      });
+    }
+
+    function enforceLandscape() {
+      const isPortrait = window.innerHeight > window.innerWidth;
+
+      if (isPortrait) {
+        message.innerHTML = 'iPhoneを横向きにしてください';
+      } else if (!timerRunning) {
+        message.innerHTML = '両手で画面をタッチしてください';
+      }
+    }
+
+    window.addEventListener('resize', enforceLandscape);
+    window.addEventListener('orientationchange', enforceLandscape);
+    const statusBar = document.getElementById('statusBar');
+    const timeDisplay = document.getElementById('timeDisplay');
+    const message = document.getElementById('message');
+    const historyList = document.getElementById('historyList');
+    const resetButton = document.getElementById('resetButton');
+
+    let timerRunning = false;
+    let armed = false;
+    let startTime = 0;
+    let animationFrame = null;
+    let recordCount = 0;
+
+    function playBeep(freq = 1000, duration = 120) {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = 'square';
+      osc.frequency.value = freq;
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start();
+      gain.gain.setValueAtTime(0.15, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + duration / 1000);
+
+      osc.stop(ctx.currentTime + duration / 1000);
+    }
+
+    function formatTime(ms) {
+      return (ms / 1000).toFixed(3);
+    }
+
+    function updateTimer() {
+      if (!timerRunning) return;
+
+      const elapsed = performance.now() - startTime;
+      timeDisplay.textContent = formatTime(elapsed);
+
+      animationFrame = requestAnimationFrame(updateTimer);
+    }
+
+    function startTimer() {
+      timerRunning = true;
+      armed = false;
+      startTime = performance.now();
+
+      message.textContent = '計測中';
+      playBeep(1200, 100);
+
+      updateTimer();
+    }
+
+    function stopTimer() {
+      timerRunning = false;
+      cancelAnimationFrame(animationFrame);
+
+      const elapsed = performance.now() - startTime;
+      const formatted = formatTime(elapsed);
+
+      timeDisplay.textContent = formatted;
+      playBeep(700, 180);
+
+      recordCount++;
+
+      const row = document.createElement('div');
+      row.className = 'record';
+      row.innerHTML = `
+        <span>${recordCount}</span>
+        <span>${formatted} 秒</span>
+      `;
+
+      historyList.prepend(row);
+
+      message.textContent = '両手でタッチしてスタート準備';
+    }
+
+    function getTouchInfo(event) {
+      const touches = event.touches;
+
+      if (touches.length < 2) {
+        return { valid: false };
+      }
+
+      let left = false;
+      let right = false;
+
+      for (let i = 0; i < touches.length; i++) {
+        const t = touches[i];
+
+        if (t.clientX < window.innerWidth / 2) {
+          left = true;
+        } else {
+          right = true;
+        }
+      }
+
+      return {
+        valid: left && right
+      };
+    }
+
+    function updateReadyState(isReady) {
+      statusBar.classList.toggle('ready', isReady);
+    }
+
+    document.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+
+      const info = getTouchInfo(e);
+
+      if (info.valid && !timerRunning) {
+        armed = true;
+        updateReadyState(true);
+        message.textContent = '手を離すとスタート';
+      }
+
+      if (info.valid && timerRunning) {
+        stopTimer();
+        updateReadyState(true);
+      }
+    }, { passive: false });
+
+    document.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+    }, { passive: false });
+
+    document.addEventListener('touchend', (e) => {
+      e.preventDefault();
+
+      const info = getTouchInfo(e);
+
+      if (!info.valid) {
+        updateReadyState(false);
+      }
+
+      if (armed && !timerRunning && e.touches.length === 0) {
+        startTimer();
+      }
+    }, { passive: false });
+
+    enforceLandscape();
+
+    resetButton.addEventListener('click', () => {
+      historyList.innerHTML = '';
+      recordCount = 0;
+    });
+  </script>
+</body>
+</html>
