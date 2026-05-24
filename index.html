@@ -93,6 +93,7 @@ button:active {
 }
 
 .history-header {
+  padding-top: calc(env(safe-area-inset-top) + 10px);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -114,13 +115,16 @@ button:active {
 
 .record {
   display: flex;
-  justify-content: space-between;
-  padding: 14px 0;
+  justify-content: center;
+  gap: 60px;
+  padding: 14px 40px;
   border-bottom: 1px solid #333;
   font-size: 24px;
+  text-align: center;
 }
 
 .footer {
+  padding-bottom: calc(env(safe-area-inset-bottom) + 14px);
   padding: 14px;
   border-top: 1px solid #333;
 }
